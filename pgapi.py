@@ -1,0 +1,126 @@
+#!/usr/bin/env python
+# coding:utf-8
+
+import os
+import sys
+import json
+import datetime
+import logging
+import logging.handlers
+import thread
+import bottle
+import string
+import psycopg2
+from bottle import request, install, default_app,route, run, get,post,delete,put
+
+if sys.version_info.major == 2:
+    reload(sys)
+    sys.setdefaultencoding('utf8')
+
+# 定义日志输出格式
+curdir = os.path.split(os.path.realpath(__file__))[0]
+logdir = os.path.join(curdir,'log')
+if not os.path.isdir(logdir):
+    os.mkdir(logdir)
+log = logging.getLogger('pgapi')
+log.setLevel(logging.DEBUG)
+
+debuglog = logging.handlers.TimedRotatingFileHandler(
+    "%s/debug_log" % logdir, when="midnight", backupCount=90)
+debuglog.setLevel(logging.DEBUG)
+
+errorlog = logging.handlers.TimedRotatingFileHandler(
+    "%s/error_log" % logdir, when="midnight", backupCount=90)
+errorlog.setLevel(logging.ERROR)
+
+formatter = logging.Formatter(
+    '%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s')
+
+debuglog.setFormatter(formatter)
+errorlog.setFormatter(formatter)
+
+log.addHandler(debuglog)
+log.addHandler(errorlog)
+
+OKPATH = string.ascii_letters+string.digits+'_'
+
+URI = 'postgres://postgres:pgsql@127.0.0.1:5432/sjd'
+
+@route('/api/<path>/',method=['GET','POST','PUT','DELETE'])
+def callback(path):
+    _now = datetime.datetime.now()
+    _intime = _now.strftime("%Y-%m-%d %H:%M:%S.%f")
+    _tag = '{}_{}'.format(thread.get_ident(),_now.strftime("%d%H%M%S%f"))
+    request.environ['QUERY_STRING']= request.environ.get('QUERY_STRING', '')+'&_tag='+_tag
+    headers, query, forms,ajson = {},{},{},{}
+    for x,y in request.headers.items():
+        headers[x]=y
+    for x,y in request.query.decode().allitems():
+        query[x]=y
+    try:
+        for x,y in request.forms.decode().allitems():
+            forms[x]=y
+    except:
+        pass
+    try:
+        ajson = request.json
+        if ajson is None:
+            ajson = {}
+    except:
+        pass
+    _raw = request._get_body_string().decode()
+    _json = {
+            'urlpath':request.path,
+            'httpver':request.get('SERVER_PROTOCOL'),
+            'ip':request.environ.get('REMOTE_ADDR',''),
+            "method":request.method,
+            "headers":headers,
+            "query":query,
+            "intime":_intime,
+            "forms":forms,
+            "remark":"",
+            "json":ajson,
+            "raw":_raw}
+    if not all(c in OKPATH for c in path):
+        # 下面的一行代码用来发送告警
+        #sendwx('接口 /api/{path}/ 不正常,可能有人攻击或进行漏洞检测,请联系吕不为'.format(path=path))
+        return {"resid":-1,"resmsg":"URL地址不正确"}
+    _json1 = json.dumps(_json,ensure_ascii=False)
+    _con = psycopg2.connect(URI)
+    sql = "SELECT * FROM func_api_{path}('{_json1}')".format(path=path,_json1=_json1)
+    log.debug("接口SQL请求:{sql}".format(sql=sql))
+    try:
+        cur = _con.cursor()
+        cur.execute(sql)
+        record=cur.fetchall()[0][0]
+        _con.commit()
+        log.debug("接口SQL返回:{record}".format(record=record))
+        if isinstance(record,str) and len(record)>0 and record[0]=='{':
+            record = json.loads(record)
+        # 下面4行用来把调用的数据入日志库
+        #_json['result']=record
+        #_json = json.dumps(_json)
+        #cur.execute("SELECT * FROM urlog('{_json}')".format(_json=_json))
+        #_con.commit()
+        return record
+    except Exception as e:
+        _con.rollback()
+        log.exception('接口SQL异常{sql}'.format(sql=sql))
+        _json['remark']='异常'
+        _json['result']=str(e).replace('"','').replace("'",'')
+        _json = json.dumps(_json)
+        cur = _con.cursor()
+        sql = "SELECT * FROM urlog('{_json}')".format(_json=_json)
+        cur.execute(sql)
+        _con.commit()
+        # 下面的一行代码用来发送告警
+        #_url = 'http://xxx.xxx.xxx.xxx/urlerr?tag={_tag}'.format(_tag=_tag)
+        #sendwx('接口/api/pin/{path}/查询异常:{_url}'.format(path=path,_url=_url))
+        return {"resid":-999,"resmsg":"查询出错"}
+
+if __name__ == '__main__':
+    app = default_app()
+    run(app, host='0.0.0.0', port=9900, debug=True, reloader=True)
+else:
+    application = default_app()
+    application = SessionMiddleware(application, session_opts)

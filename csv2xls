@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+
+# csv2xlsx 可以超过65536行的限制,在低版本的excel上只能显示65536行，
+# 但实际上不会丢失数据,在高版本上的可以正确的看到数据行数
+
+import os
+import sys
+import glob
+import csv
+import argparse
+from xlsxwriter.workbook import Workbook
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-o','--output',nargs='?',help='输出文件名称',default='',required=False)
+parser.add_argument('-v','--version',nargs='?',help='版本',default='',required=False)
+parser.add_argument('-V','--verbose',nargs='?',help='详细输出',default='',required=False)
+
+args = parser.parse_args()
+if args.version:
+    print('版本:1.0 build_date:2017-05-23')
+    sys.exit(0)
+
+print(args.output)
+if args.output is None:
+    for csvfile in glob.glob('*.csv'):
+        print(f'Processing... {csvfile}')
+        xlsfile = os.path.splitext(csvfile)[0]+'.xlsx'
+        workbook = Workbook(csvfile + '.xlsx')
+        worksheet = workbook.add_worksheet()
+        with open(csvfile, 'r') as f:
+            reader = csv.reader(f)
+            for r, row in enumerate(reader):
+                for c, col in enumerate(row):
+                    worksheet.write(r, c, col)
+        workbook.close()
+else:
+    csvfilename = args.output
+    if not os.path.isfile(csvfilename):
+        print('Csv File Not Found!')
+        sys.exit(-1)
+    xlsfilename = os.path.splitext(csvfilename)[0]+'.xlsx'
+    if os.path.isfile(xlsfilename):
+        print('xlsx File Exists!')
+        sys.exit(-2)
+    workbook = Workbook(xlsfilename)
+    worksheet = workbook.add_worksheet()
+    with open(csvfilename, 'r') as f:
+        reader = csv.reader(f)
+        for r,row in enumerate(reader):
+            for c,col in enumerate(row):
+                worksheet.write(r, c, col)
+    workbook.close()
