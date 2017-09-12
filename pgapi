@@ -44,7 +44,7 @@ log.addHandler(errorlog)
 
 OKPATH = string.ascii_letters+string.digits+'_'
 
-URI = 'postgres://postgres:pgsql@127.0.0.1:5432/sjd'
+URI = 'postgres://postgres:pgsql@127.0.0.1:5432/postgres'
 
 @route('/api/<path>/',method=['GET','POST','PUT','DELETE'])
 def callback(path):
