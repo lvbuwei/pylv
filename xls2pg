@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import time
+import datetime
+import argparse
+import psycopg2
+import xlrd
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-i','--input',nargs='?',help='输入文件名称',default='',required=False)
+parser.add_argument('-v','--version',nargs='?',help='版本',default='',required=False)
+parser.add_argument('-H','--host',nargs='?',help='数据库主机地址',default='127.0.0.1',required=False)
+parser.add_argument('-p','--port',nargs='?',help='数据库主机端口',default='5432',required=False)
+parser.add_argument('-u','--user',nargs='?',help='数据库用户名称',default='postgres',required=False)
+parser.add_argument('-P','--password',nargs='?',help='数据库用户密码',default='5432',required=False)
+parser.add_argument('-d','--dbname',nargs='?',help='数据库名称',default='postgres',required=False)
+parser.add_argument('-s','--sheetnumber',nargs='?',help='Sheet Page No',default='0',required=False)
+# parser.add_argument('-e','--ext',nargs='?',help='增加id,ctime,remark1,remark2,remark3,result扩展字段',default='',required=False)
+args = parser.parse_args()
+
+DBURI = f'postgres://{args.user}:{args.password}@{args.host}:{args.port}/{args.dbname}'
+print(DBURI)
+con = psycopg2.connect(DBURI)
+if args.version:
+  print('版本:1.0 build_date:2017-05-23')
+  sys.exit(0)
+print(args.input)
+if args.input is None:
+    print('args input参数为空')
+    sys.exit(-1)
+else:
+    xlsxfilename = args.input
+    print('准备导入:'+xlsxfilename)
+    if not os.path.isfile(xlsxfilename):
+        print('xlsx File Not Found!')
+        sys.exit(-1)
+    xlsxfilename = os.path.splitext(xlsxfilename)[0]+'.xlsx'
+    if not os.path.isfile(xlsxfilename):
+        print('xlsx File Not Exists!')
+        sys.exit(-2)
+    data = xlrd.open_workbook(xlsxfilename)
+    tablename = data.sheet_names()[0]
+    tablename = tablename.lower()
+    print('tablename',tablename)
+    tables = data.sheets()
+    table = tables[int(args.sheetnumber)]
+    _basename = os.path.basename(xlsxfilename)
+    _tablename = f'{_basename[:-5]}_{tablename}'
+    print('table',_tablename)
+    nrows = table.nrows
+    print('nrows',nrows)
+    columns = table.row_values(0)
+    cols = ',\n    '.join([f"{x} text default ''" for x in columns])
+    sql = f"""CREATE TABLE IF NOT EXISTS {_tablename} (
+    id serial primary key,
+    ctime timestamp default now(),
+    {cols},
+    operator TEXT,
+    remark1 TEXT,
+    remark2 TEXT,
+    remark3 TEXT,
+    Result TEXT
+    );"""
+    print(sql)
+    cur = con.cursor()
+    cur.execute(sql)
+    con.commit()
+    for i in range(5):
+        print(f'{5-i}后开始执行导入数据...',end=' ',flush=True)
+        time.sleep(1)
+    i = 0
+    print('')
+    _now = datetime.datetime.now()
+    for rownum in range(1, nrows):
+        row = table.row_values(rownum)
+        if row:
+            cols = ','.join(columns)
+            vals = ','.join([f"'{str(x).strip()}'" for x in row])
+            ins = f"INSERT INTO {_tablename} ({cols}) VALUES({vals});"
+            print(i,ins)
+            cur=con.cursor()
+            cur.execute(ins)
+            con.commit()
+            i+=1
+            #if i>10:
+            #    break
+    _seconds = (datetime.datetime.now() - _now).total_seconds()
+    print(f'入库数共计: {i} 条记录,耗时:{_seconds}秒')
